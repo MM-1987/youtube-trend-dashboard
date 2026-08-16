@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YouTube 트렌드 수집기</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root{
+    --bg:#f5f6fa; --card:#ffffff; --text:#1a1a1a; --muted:#666;
+    --border:#e2e2e6; --accent:#ff0033; --accent2:#4f46e5; --hover:#f0f1f5;
+  }
+  html.dark{
+    --bg:#121214; --card:#1c1c1f; --text:#f0f0f0; --muted:#9a9a9f;
+    --border:#333338; --hover:#2a2a2e;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Malgun Gothic",sans-serif;
+    background:var(--bg); color:var(--text); transition:background .2s,color .2s;
+  }
+  .app{max-width:1200px; margin:0 auto; padding:20px;}
+  header{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;}
+  header h1{font-size:1.4rem; margin:0; display:flex; align-items:center; gap:10px;}
+  header h1 svg{flex-shrink:0; display:block;}
+  #themeToggle{background:var(--card); border:1px solid var(--border); border-radius:8px; padding:8px 12px; cursor:pointer; color:var(--text);}
+
+  .apikey-bar{
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;
+  }
+  .apikey-bar input{flex:1; min-width:220px;}
+  .hint{font-size:.78rem; color:var(--muted);}
+
+  input, select, button{
+    font-size:.85rem; padding:8px 10px; border-radius:8px; border:1px solid var(--border);
+    background:var(--card); color:var(--text);
+  }
+  button{cursor:pointer;}
+  button:hover{background:var(--hover);}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+  button.primary:hover{opacity:.9; background:var(--accent);}
+  button:disabled{opacity:.5; cursor:not-allowed;}
+
+  .controls{
+    display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+    background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;
+  }
+  .controls label{font-size:.82rem; display:flex; align-items:center; gap:4px; color:var(--muted);}
+  #searchInput{min-width:160px;}
+
+  #statusMsg{margin-bottom:10px; font-size:.85rem; min-height:1.2em;}
+  #statusMsg.error{color:var(--accent);}
+  #statusMsg.info{color:var(--muted);}
+
+  .tabs{display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;}
+  .tab{background:var(--card); border:1px solid var(--border); border-radius:8px; padding:8px 14px;}
+  .tab.active{background:var(--accent2); border-color:var(--accent2); color:#fff;}
+
+  .tab-panel{display:none; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px;}
+  .tab-panel.active{display:block;}
+
+  /* card view */
+  .card-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:14px;}
+  .video-card{position:relative; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:var(--card); transition:transform .15s, box-shadow .15s;}
+  .video-card:hover{transform:translateY(-2px); box-shadow:0 6px 16px rgba(0,0,0,.15);}
+  .card-link{display:block; color:inherit; text-decoration:none;}
+  .video-card img{width:100%; aspect-ratio:16/9; object-fit:cover; display:block; background:var(--hover);}
+  .card-body{padding:10px;}
+  .card-title{font-size:.85rem; font-weight:600; margin:0 0 6px; line-height:1.3; min-height:2.2em; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+  .card-channel{font-size:.76rem; color:var(--muted); margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .card-meta{font-size:.76rem; color:var(--muted); display:flex; justify-content:space-between;}
+  .card-fav-btn{position:absolute; top:6px; right:6px; z-index:2; background:rgba(0,0,0,.55); color:#fff; border:none; border-radius:50%; width:28px; height:28px; cursor:pointer; font-size:.95rem; display:flex; align-items:center; justify-content:center; padding:0;}
+  .card-fav-btn:hover{background:rgba(0,0,0,.75);}
+
+  table{width:100%; border-collapse:collapse; font-size:.83rem;}
+  th, td{padding:8px 6px; border-bottom:1px solid var(--border); text-align:left; vertical-align:middle;}
+  th{color:var(--muted); font-weight:600; white-space:nowrap; cursor:default;}
+  td.num{text-align:right; white-space:nowrap;}
+  td.rank{text-align:center; color:var(--muted); font-weight:600; width:36px;}
+  td.thumb img{width:88px; border-radius:6px; display:block;}
+  td.title{max-width:280px;}
+  td.title a{color:var(--text); text-decoration:none; font-weight:500;}
+  td.title a:hover{text-decoration:underline;}
+  .fav-btn{background:none; border:none; font-size:1.1rem; cursor:pointer; padding:2px 6px;}
+  .table-wrap{overflow-x:auto;}
+
+  .bar-row{display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:.83rem;}
+  .bar-label{width:130px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .bar-track{flex:1; background:var(--hover); border-radius:4px; height:16px; overflow:hidden;}
+  .bar-fill{height:100%; background:var(--accent2);}
+  .bar-count{width:40px; text-align:right; color:var(--muted); flex-shrink:0;}
+
+  .charts-grid{display:grid; grid-template-columns:1fr 1fr; gap:24px;}
+  .chart-box h3{font-size:.9rem; margin:0 0 10px; color:var(--muted);}
+  @media(max-width:760px){ .charts-grid{grid-template-columns:1fr;} }
+
+  .empty-msg{color:var(--muted); font-size:.85rem; padding:20px 0; text-align:center;}
+  canvas{max-width:100%;}
+  @media(max-width:640px){
+    td.title{max-width:160px;}
+    td.thumb img{width:64px;}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>
+      <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true">
+        <rect width="24" height="24" rx="6" fill="#FF0000"/>
+        <path d="M10 8l6 4-6 4V8z" fill="#ffffff"/>
+      </svg>
+      YouTube 트렌드 수집기
+    </h1>
+    <button id="themeToggle" title="다크모드 전환">🌙</button>
+  </header>
+
+  <section class="apikey-bar">
+    <input type="password" id="apiKeyInput" placeholder="YouTube Data API v3 키 입력" />
+    <button id="saveKeyBtn">저장</button>
+    <span class="hint">키는 이 브라우저의 localStorage에만 저장되며 외부로 전송되지 않습니다. Google Cloud Console에서 발급하고 HTTP 리퍼러 제한을 걸어 사용하세요.</span>
+  </section>
+
+  <section class="controls">
+    <select id="regionSelect"></select>
+    <select id="categorySelect"><option value="">전체 카테고리</option></select>
+    <select id="maxResults">
+      <option value="10">10개</option>
+      <option value="25" selected>25개</option>
+      <option value="50">50개</option>
+    </select>
+    <select id="sortSelect">
+      <option value="views_desc">조회수 높은순</option>
+      <option value="rate_desc">시간당 조회수(증가율)순</option>
+      <option value="likes_desc">좋아요순</option>
+      <option value="comments_desc">댓글순</option>
+      <option value="recent_desc">최신순</option>
+    </select>
+    <input type="text" id="searchInput" placeholder="불러온 목록 내 필터링..." />
+    <label><input type="checkbox" id="favOnlyCheck" /> 즐겨찾기만</label>
+    <button id="fetchBtn" class="primary">🔄 트렌드 불러오기</button>
+    <button id="snapshotBtn">📸 즐겨찾기 스냅샷 저장</button>
+    <button id="exportBtn">⬇ CSV 내보내기</button>
+    <button id="clearDataBtn">🗑 저장 데이터 초기화</button>
+  </section>
+
+  <section class="apikey-bar">
+    <input type="text" id="keywordSearchInput" placeholder="키워드로 영상 수집 (예: 아이유, 브이로그)" />
+    <button id="keywordSearchBtn" class="primary">🔍 키워드로 수집</button>
+    <span class="hint">유튜브 전체에서 해당 키워드로 실제 검색해 영상을 가져옵니다. 검색 API는 할당량 소모가 커서(1회당 100 유닛, 기본 일일 10,000 유닛) 남용하지 마세요.</span>
+  </section>
+
+  <div id="statusMsg" class="info"></div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="cards">카드 뷰</button>
+    <button class="tab" data-tab="ranking">순위표</button>
+    <button class="tab" data-tab="charts">차트</button>
+    <button class="tab" data-tab="keywords">키워드 분석</button>
+    <button class="tab" data-tab="channels">채널 랭킹</button>
+    <button class="tab" data-tab="trend">즐겨찾기 추이</button>
+  </nav>
+
+  <section id="tab-cards" class="tab-panel active">
+    <div id="cardGrid" class="card-grid"></div>
+    <div id="cardsEmpty" class="empty-msg">API 키를 저장하고 '트렌드 불러오기'를 눌러 시작하세요.</div>
+  </section>
+
+  <section id="tab-ranking" class="tab-panel">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>순위</th><th></th><th>썸네일</th><th>제목</th><th>채널</th>
+            <th>조회수</th><th>시간당 조회수</th><th>좋아요</th><th>댓글</th><th>게시일</th>
+          </tr>
+        </thead>
+        <tbody id="rankingTableBody"></tbody>
+      </table>
+    </div>
+    <div id="rankingEmpty" class="empty-msg">먼저 트렌드를 불러오세요.</div>
+  </section>
+
+  <section id="tab-charts" class="tab-panel">
+    <div class="charts-grid">
+      <div class="chart-box">
+        <h3>조회수 / 좋아요 (상위 10개)</h3>
+        <canvas id="barChart" height="220"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>카테고리 분포</h3>
+        <canvas id="pieChart" height="220"></canvas>
+      </div>
+    </div>
+    <div id="chartsEmpty" class="empty-msg">먼저 트렌드를 불러오세요.</div>
+  </section>
+
+  <section id="tab-keywords" class="tab-panel">
+    <div id="keywordList"></div>
+    <div id="keywordEmpty" class="empty-msg">먼저 트렌드를 불러오세요.</div>
+  </section>
+
+  <section id="tab-channels" class="tab-panel">
+    <div id="channelList"></div>
+    <div id="channelEmpty" class="empty-msg">먼저 트렌드를 불러오세요.</div>
+  </section>
+
+  <section id="tab-trend" class="tab-panel">
+    <canvas id="trendChart" height="100"></canvas>
+    <div id="trendEmpty" class="empty-msg">즐겨찾기(⭐)한 영상을 만들고 '즐겨찾기 스냅샷 저장'을 여러 번 눌러보세요. 저장할 때마다 조회수 변화가 그래프에 쌓입니다.</div>
+  </section>
+</div>
+
+<script>
+const REGIONS = [
+  ['KR','대한민국'],['US','미국'],['JP','일본'],['GB','영국'],['DE','독일'],
+  ['FR','프랑스'],['IN','인도'],['BR','브라질'],['CA','캐나다'],['AU','호주'],
+  ['ID','인도네시아'],['VN','베트남'],['TW','대만'],['MX','멕시코'],['RU','러시아']
+];
+const STOPWORDS = new Set([
+  'the','a','an','and','or','of','to','in','on','for','with','is','it','this','that',
+  '이','그','저','것','수','들','및','등','더','를','을','은','는','이런','저런','그리고',
+  '영상','오늘','우리','너무','정말','진짜','완전','shorts','short','video','official'
+]);
+const PALETTE = ['#ff0033','#4f46e5','#059669','#d97706','#7c3aed','#0891b2','#db2777','#65a30d','#0284c7','#ea580c','#9333ea','#16a34a'];
+
+let videos = [];
+let lastFetchMode = null; // 'trending' | 'keyword' - 국가/카테고리 변경 시 자동 재조회 대상을 구분하기 위함
+let categoriesCache = {};
+let lastFetchRegion = 'KR';
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('statusMsg');
+
+function setStatus(msg, type){
+  statusEl.textContent = msg || '';
+  statusEl.className = type || 'info';
+}
+
+function getApiKey(){ return localStorage.getItem('yt_api_key') || ''; }
+function getFavorites(){ return JSON.parse(localStorage.getItem('yt_favorites') || '[]'); }
+function setFavorites(arr){ localStorage.setItem('yt_favorites', JSON.stringify(arr)); }
+function isFavorite(id){ return getFavorites().includes(id); }
+function toggleFavorite(id){
+  const favs = getFavorites();
+  const idx = favs.indexOf(id);
+  if(idx >= 0) favs.splice(idx,1); else favs.push(id);
+  setFavorites(favs);
+}
+function getHistory(){ return JSON.parse(localStorage.getItem('yt_history') || '{}'); }
+function setHistory(h){ localStorage.setItem('yt_history', JSON.stringify(h)); }
+
+// ---- theme ----
+function initTheme(){
+  const saved = localStorage.getItem('yt_theme');
+  if(saved === 'dark'){ document.documentElement.classList.add('dark'); $('themeToggle').textContent = '☀️'; }
+}
+$('themeToggle').addEventListener('click', () => {
+  const dark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('yt_theme', dark ? 'dark' : 'light');
+  $('themeToggle').textContent = dark ? '☀️' : '🌙';
+});
+
+// ---- setup ----
+function initRegions(){
+  const sel = $('regionSelect');
+  sel.innerHTML = REGIONS.map(([code,label]) => `<option value="${code}">${label}</option>`).join('');
+  sel.value = localStorage.getItem('yt_region') || 'KR';
+}
+
+$('saveKeyBtn').addEventListener('click', () => {
+  const key = $('apiKeyInput').value.trim();
+  if(!key){ setStatus('API 키를 입력하세요.', 'error'); return; }
+  localStorage.setItem('yt_api_key', key);
+  setStatus('API 키가 저장되었습니다.', 'info');
+  loadCategories();
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  initTheme();
+  initRegions();
+  const savedKey = getApiKey();
+  if(savedKey){ $('apiKeyInput').value = savedKey; loadCategories(); }
+  renderTrendChart();
+});
+
+$('regionSelect').addEventListener('change', async () => {
+  localStorage.setItem('yt_region', $('regionSelect').value);
+  await loadCategories();
+  if(lastFetchMode === 'trending') fetchTrending();
+});
+
+// ---- API ----
+async function apiGet(path, params){
+  const key = getApiKey();
+  if(!key) throw new Error('API 키가 없습니다.');
+  const url = new URL(`https://www.googleapis.com/youtube/v3/${path}`);
+  Object.entries(params).forEach(([k,v]) => { if(v !== '' && v != null) url.searchParams.set(k, v); });
+  url.searchParams.set('key', key);
+  const res = await fetch(url);
+  const data = await res.json();
+  if(!res.ok){ throw new Error(data.error?.message || `요청 실패 (HTTP ${res.status})`); }
+  return data;
+}
+
+async function ensureCategoriesLoaded(region){
+  if(categoriesCache[region]) return categoriesCache[region];
+  const data = await apiGet('videoCategories', { part:'snippet', regionCode: region });
+  const items = (data.items || []).filter(i => i.snippet.assignable);
+  categoriesCache[region] = items;
+  return items;
+}
+
+async function loadCategories(){
+  const region = $('regionSelect').value;
+  try{
+    const items = await ensureCategoriesLoaded(region);
+    fillCategorySelect(items);
+    if(items.length === 0){
+      setStatus(`'${region}' 지역에서 사용 가능한 카테고리 정보가 없습니다. 전체 카테고리로 조회됩니다.`, 'info');
+    }
+  }catch(e){
+    setStatus(`카테고리 로드 실패: ${e.message}`, 'error');
+  }
+}
+
+function fillCategorySelect(items){
+  const sel = $('categorySelect');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">전체 카테고리</option>' +
+    items.map(i => `<option value="${i.id}">${i.snippet.title}</option>`).join('');
+  sel.value = current;
+}
+
+function getCategoryName(id){
+  const items = categoriesCache[lastFetchRegion] || [];
+  const found = items.find(i => i.id === id);
+  return found ? found.snippet.title : `카테고리 ${id}`;
+}
+
+async function fetchTrending(){
+  const btn = $('fetchBtn');
+  btn.disabled = true;
+  setStatus('불러오는 중...', 'info');
+  try{
+    const region = $('regionSelect').value;
+    const categoryId = $('categorySelect').value;
+    const categoryLabel = $('categorySelect').selectedOptions[0]?.textContent || '';
+    const maxResults = $('maxResults').value;
+    try{ await ensureCategoriesLoaded(region); }catch(e){ /* 카테고리 이름 로딩 실패는 무시 - 파이차트가 ID로 표시될 뿐 트렌드 조회는 계속 진행 */ }
+    const data = await apiGet('videos', {
+      part: 'snippet,statistics',
+      chart: 'mostPopular',
+      regionCode: region,
+      videoCategoryId: categoryId,
+      maxResults
+    });
+    videos = (data.items || []).map(normalizeVideo);
+    lastFetchRegion = region;
+    lastFetchMode = 'trending';
+    if(videos.length === 0){
+      setStatus(`'${region}' 지역, '${categoryLabel || '전체 카테고리'}'에는 현재 인기 급상승 영상이 없습니다. 카테고리를 '전체'로 바꾸거나 다른 국가를 선택해보세요.`, 'error');
+    }else{
+      setStatus(`${videos.length}개 영상을 불러왔습니다. (${new Date().toLocaleTimeString('ko-KR')})`, 'info');
+    }
+    renderAll();
+  }catch(e){
+    setStatus(`불러오기 실패: ${e.message}`, 'error');
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+function normalizeVideo(item){
+  const stats = item.statistics || {};
+  const snippet = item.snippet || {};
+  const publishedAt = new Date(snippet.publishedAt);
+  const hoursSince = Math.max((Date.now() - publishedAt.getTime()) / 3600000, 0.1);
+  const viewCount = parseInt(stats.viewCount || '0', 10);
+  return {
+    id: item.id,
+    title: snippet.title,
+    channelTitle: snippet.channelTitle,
+    categoryId: snippet.categoryId || '',
+    thumbnail: snippet.thumbnails?.medium?.url || snippet.thumbnails?.default?.url || '',
+    publishedAt,
+    viewCount,
+    likeCount: parseInt(stats.likeCount || '0', 10),
+    commentCount: parseInt(stats.commentCount || '0', 10),
+    tags: snippet.tags || [],
+    ratePerHour: viewCount / hoursSince
+  };
+}
+
+async function fetchByKeyword(){
+  const q = $('keywordSearchInput').value.trim();
+  if(!q){ setStatus('검색할 키워드를 입력하세요.', 'error'); return; }
+  const btn = $('keywordSearchBtn');
+  btn.disabled = true;
+  setStatus(`"${q}" 키워드로 영상을 검색하는 중...`, 'info');
+  try{
+    const region = $('regionSelect').value;
+    const categoryId = $('categorySelect').value;
+    const maxResults = $('maxResults').value;
+    const searchData = await apiGet('search', {
+      part: 'snippet',
+      q,
+      type: 'video',
+      order: 'relevance',
+      regionCode: region,
+      videoCategoryId: categoryId,
+      maxResults,
+      safeSearch: 'moderate'
+    });
+    const ids = (searchData.items || []).map(i => i.id?.videoId).filter(Boolean);
+    if(ids.length === 0){
+      videos = [];
+      lastFetchRegion = region;
+      lastFetchMode = 'keyword';
+      setStatus(`"${q}"에 대한 검색 결과가 없습니다.`, 'error');
+      renderAll();
+      return;
+    }
+    try{ await ensureCategoriesLoaded(region); }catch(e){ /* 카테고리 이름 로딩 실패는 무시 - 검색 결과 수집은 계속 진행 */ }
+    const videosData = await apiGet('videos', { part: 'snippet,statistics', id: ids.join(',') });
+    const rawVideos = (videosData.items || []).map(normalizeVideo);
+
+    const qLower = q.toLowerCase();
+    const relevant = rawVideos.filter(v =>
+      v.title.toLowerCase().includes(qLower) ||
+      v.channelTitle.toLowerCase().includes(qLower) ||
+      (v.tags || []).some(t => t.toLowerCase().includes(qLower))
+    );
+
+    videos = relevant.length > 0 ? relevant : rawVideos;
+    lastFetchRegion = region;
+    lastFetchMode = 'keyword';
+    const time = new Date().toLocaleTimeString('ko-KR');
+    if(relevant.length > 0){
+      setStatus(`"${q}" 검색 결과 ${rawVideos.length}개 중 제목/채널/태그에 키워드가 포함된 ${relevant.length}개만 수집했습니다. (${time})`, 'info');
+    }else{
+      setStatus(`"${q}"와(과) 제목/태그가 정확히 일치하는 영상은 없어, 검색된 ${rawVideos.length}개를 모두 표시합니다. (${time})`, 'info');
+    }
+    renderAll();
+  }catch(e){
+    setStatus(`키워드 수집 실패: ${e.message}`, 'error');
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+$('fetchBtn').addEventListener('click', fetchTrending);
+$('categorySelect').addEventListener('change', () => { if(lastFetchMode === 'trending') fetchTrending(); });
+$('keywordSearchBtn').addEventListener('click', fetchByKeyword);
+$('keywordSearchInput').addEventListener('keydown', (e) => { if(e.key === 'Enter') fetchByKeyword(); });
+
+// ---- filtering / sorting ----
+function getFilteredSorted(){
+  const q = $('searchInput').value.trim().toLowerCase();
+  const favOnly = $('favOnlyCheck').checked;
+  let list = videos.filter(v => {
+    if(q && !v.title.toLowerCase().includes(q)) return false;
+    if(favOnly && !isFavorite(v.id)) return false;
+    return true;
+  });
+  const sortKey = $('sortSelect').value;
+  const sorters = {
+    views_desc: (a,b) => b.viewCount - a.viewCount,
+    rate_desc: (a,b) => b.ratePerHour - a.ratePerHour,
+    likes_desc: (a,b) => b.likeCount - a.likeCount,
+    comments_desc: (a,b) => b.commentCount - a.commentCount,
+    recent_desc: (a,b) => b.publishedAt - a.publishedAt
+  };
+  list.sort(sorters[sortKey] || sorters.views_desc);
+  return list;
+}
+
+function fmtNum(n){ return n.toLocaleString('ko-KR'); }
+
+function renderAll(){
+  renderCards();
+  renderRankingTable();
+  renderCharts();
+  renderKeywords();
+  renderChannels();
+}
+
+function escapeHtml(s){
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function bindFavButtons(container, selector){
+  container.querySelectorAll(selector).forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFavorite(btn.dataset.id);
+      renderCards();
+      renderRankingTable();
+      renderTrendChart();
+    });
+  });
+}
+
+// ---- card view ----
+function renderCards(){
+  const list = getFilteredSorted();
+  const grid = $('cardGrid');
+  $('cardsEmpty').style.display = list.length ? 'none' : 'block';
+  grid.innerHTML = list.map(v => `
+    <div class="video-card">
+      <a class="card-link" href="https://www.youtube.com/watch?v=${v.id}" target="_blank" rel="noopener">
+        <img src="${v.thumbnail}" alt="" loading="lazy">
+        <div class="card-body">
+          <div class="card-title" title="${escapeHtml(v.title)}">${escapeHtml(v.title)}</div>
+          <div class="card-channel">${escapeHtml(v.channelTitle)}</div>
+          <div class="card-meta"><span>조회수 ${fmtNum(v.viewCount)}</span><span>👍 ${fmtNum(v.likeCount)}</span></div>
+        </div>
+      </a>
+      <button class="card-fav-btn" data-id="${v.id}">${isFavorite(v.id) ? '⭐' : '☆'}</button>
+    </div>
+  `).join('');
+  bindFavButtons(grid, '.card-fav-btn');
+}
+
+// ---- ranking table ----
+function renderRankingTable(){
+  const list = getFilteredSorted();
+  const body = $('rankingTableBody');
+  $('rankingEmpty').style.display = list.length ? 'none' : 'block';
+  body.innerHTML = list.map((v,i) => `
+    <tr>
+      <td class="rank">${i+1}</td>
+      <td><button class="fav-btn" data-id="${v.id}">${isFavorite(v.id) ? '⭐' : '☆'}</button></td>
+      <td class="thumb"><img src="${v.thumbnail}" alt="" loading="lazy"></td>
+      <td class="title"><a href="https://www.youtube.com/watch?v=${v.id}" target="_blank" rel="noopener">${escapeHtml(v.title)}</a></td>
+      <td>${escapeHtml(v.channelTitle)}</td>
+      <td class="num">${fmtNum(v.viewCount)}</td>
+      <td class="num">${fmtNum(Math.round(v.ratePerHour))}</td>
+      <td class="num">${fmtNum(v.likeCount)}</td>
+      <td class="num">${fmtNum(v.commentCount)}</td>
+      <td class="num">${v.publishedAt.toLocaleString('ko-KR')}</td>
+    </tr>
+  `).join('');
+  bindFavButtons(body, '.fav-btn');
+}
+
+['searchInput'].forEach(id => $(id).addEventListener('input', () => { renderCards(); renderRankingTable(); }));
+['favOnlyCheck','sortSelect'].forEach(id => $(id).addEventListener('change', () => { renderCards(); renderRankingTable(); }));
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    $(`tab-${tab.dataset.tab}`).classList.add('active');
+    if(tab.dataset.tab === 'charts'){ barChartInstance?.resize(); pieChartInstance?.resize(); }
+    if(tab.dataset.tab === 'trend'){ trendChartInstance?.resize(); }
+  });
+});
+
+// ---- keywords ----
+function tokenize(text){
+  return (text || '')
+    .toLowerCase()
+    .split(/[\s\|\-_,.!?()\[\]"'#@:;/\\~^*+=<>「」『』【】、。~★☆♥♡…]+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 2 && !STOPWORDS.has(t) && !/^\d+$/.test(t));
+}
+
+function renderKeywords(){
+  const counts = {};
+  videos.forEach(v => {
+    const tokens = tokenize(v.title).concat((v.tags || []).map(t => t.toLowerCase()));
+    tokens.forEach(t => { counts[t] = (counts[t] || 0) + 1; });
+  });
+  const top = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,20);
+  $('keywordEmpty').style.display = top.length ? 'none' : 'block';
+  const max = top.length ? top[0][1] : 1;
+  $('keywordList').innerHTML = top.map(([word,count]) => `
+    <div class="bar-row">
+      <div class="bar-label" title="${escapeHtml(word)}">${escapeHtml(word)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(count/max*100).toFixed(0)}%"></div></div>
+      <div class="bar-count">${count}</div>
+    </div>
+  `).join('');
+}
+
+// ---- channels ----
+function renderChannels(){
+  const agg = {};
+  videos.forEach(v => {
+    if(!agg[v.channelTitle]) agg[v.channelTitle] = { count:0, views:0 };
+    agg[v.channelTitle].count += 1;
+    agg[v.channelTitle].views += v.viewCount;
+  });
+  const top = Object.entries(agg).sort((a,b) => b[1].views - a[1].views).slice(0,20);
+  $('channelEmpty').style.display = top.length ? 'none' : 'block';
+  const max = top.length ? top[0][1].views : 1;
+  $('channelList').innerHTML = top.map(([name,info]) => `
+    <div class="bar-row">
+      <div class="bar-label" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(info.views/max*100).toFixed(0)}%"></div></div>
+      <div class="bar-count">${info.count}개</div>
+    </div>
+  `).join('');
+}
+
+// ---- bar / pie charts ----
+let barChartInstance = null;
+let pieChartInstance = null;
+
+function chartTextColors(){
+  const style = getComputedStyle(document.documentElement);
+  return { text: style.getPropertyValue('--text').trim(), muted: style.getPropertyValue('--muted').trim() };
+}
+
+function renderCharts(){
+  $('chartsEmpty').style.display = videos.length ? 'none' : 'block';
+  const colors = chartTextColors();
+
+  if(barChartInstance){ barChartInstance.destroy(); barChartInstance = null; }
+  if(pieChartInstance){ pieChartInstance.destroy(); pieChartInstance = null; }
+  if(videos.length === 0) return;
+
+  const top10 = getFilteredSorted().slice(0,10);
+  const barLabels = top10.map(v => v.title.length > 18 ? v.title.slice(0,18)+'…' : v.title);
+  barChartInstance = new Chart($('barChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: barLabels,
+      datasets: [
+        { label: '조회수', data: top10.map(v => v.viewCount), backgroundColor: PALETTE[0], yAxisID: 'y' },
+        { label: '좋아요', data: top10.map(v => v.likeCount), backgroundColor: PALETTE[1], yAxisID: 'y1' }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: colors.text } } },
+      scales: {
+        x: { ticks: { color: colors.muted } },
+        y: { position: 'left', ticks: { color: colors.muted }, title: { display:true, text:'조회수', color: colors.muted } },
+        y1: { position: 'right', ticks: { color: colors.muted }, grid: { drawOnChartArea:false }, title: { display:true, text:'좋아요', color: colors.muted } }
+      }
+    }
+  });
+
+  const catCounts = {};
+  videos.forEach(v => {
+    const name = getCategoryName(v.categoryId);
+    catCounts[name] = (catCounts[name] || 0) + 1;
+  });
+  const catEntries = Object.entries(catCounts).sort((a,b) => b[1]-a[1]);
+  pieChartInstance = new Chart($('pieChart').getContext('2d'), {
+    type: 'pie',
+    data: {
+      labels: catEntries.map(([name]) => name),
+      datasets: [{ data: catEntries.map(([,c]) => c), backgroundColor: catEntries.map((_,i) => PALETTE[i % PALETTE.length]) }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { color: colors.text } } }
+    }
+  });
+}
+
+// ---- snapshot / trend chart ----
+$('snapshotBtn').addEventListener('click', () => {
+  const favs = getFavorites();
+  const favVideos = videos.filter(v => favs.includes(v.id));
+  if(favVideos.length === 0){
+    setStatus('즐겨찾기(⭐)한 영상이 현재 목록에 없습니다. 먼저 즐겨찾기하세요.', 'error');
+    return;
+  }
+  const history = getHistory();
+  const t = Date.now();
+  favVideos.forEach(v => {
+    if(!history[v.id]) history[v.id] = { title: v.title, points: [] };
+    history[v.id].title = v.title;
+    history[v.id].points.push({ t, v: v.viewCount });
+    if(history[v.id].points.length > 100) history[v.id].points.shift();
+  });
+  setHistory(history);
+  setStatus(`${favVideos.length}개 즐겨찾기 영상의 스냅샷을 저장했습니다.`, 'info');
+  renderTrendChart();
+});
+
+let trendChartInstance = null;
+function renderTrendChart(){
+  const favs = getFavorites();
+  const history = getHistory();
+  const entries = Object.entries(history).filter(([id]) => favs.includes(id));
+  $('trendEmpty').style.display = entries.length ? 'none' : 'block';
+  const ctx = $('trendChart').getContext('2d');
+  if(trendChartInstance){ trendChartInstance.destroy(); trendChartInstance = null; }
+  if(entries.length === 0) return;
+
+  const allTimes = new Set();
+  entries.forEach(([,d]) => d.points.forEach(p => allTimes.add(p.t)));
+  const times = Array.from(allTimes).sort((a,b) => a-b);
+  const labels = times.map(t => new Date(t).toLocaleString('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }));
+  const colors = chartTextColors();
+
+  const datasets = entries.map(([id,d], idx) => {
+    const pointMap = new Map(d.points.map(p => [p.t, p.v]));
+    return {
+      label: d.title.length > 30 ? d.title.slice(0,30)+'…' : d.title,
+      data: times.map(t => pointMap.has(t) ? pointMap.get(t) : null),
+      borderColor: PALETTE[idx % PALETTE.length],
+      backgroundColor: PALETTE[idx % PALETTE.length],
+      spanGaps: true,
+      tension: 0.2
+    };
+  });
+
+  trendChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { color: colors.text } } },
+      scales: {
+        x: { ticks: { color: colors.muted } },
+        y: { ticks: { color: colors.muted } }
+      }
+    }
+  });
+}
+
+// ---- CSV export ----
+$('exportBtn').addEventListener('click', () => {
+  const list = getFilteredSorted();
+  if(list.length === 0){ setStatus('내보낼 데이터가 없습니다.', 'error'); return; }
+  const header = ['순위','제목','채널','조회수','시간당 조회수','좋아요','댓글','게시일'];
+  const rows = list.map((v,i) => [
+    i+1, v.title, v.channelTitle, v.viewCount, Math.round(v.ratePerHour),
+    v.likeCount, v.commentCount, v.publishedAt.toLocaleString('ko-KR')
+  ]);
+  const csv = [header, ...rows]
+    .map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `youtube_trend_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ---- clear data ----
+$('clearDataBtn').addEventListener('click', () => {
+  if(!confirm('저장된 즐겨찾기와 추이 히스토리를 모두 삭제할까요? (API 키는 유지됩니다)')) return;
+  localStorage.removeItem('yt_favorites');
+  localStorage.removeItem('yt_history');
+  renderCards();
+  renderRankingTable();
+  renderTrendChart();
+  setStatus('저장 데이터를 초기화했습니다.', 'info');
+});
+</script>
+</body>
+</html>
